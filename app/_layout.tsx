@@ -1,39 +1,100 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
+// app/_layout.tsx
+
+import { useEffect, useState } from 'react';
+import { Stack, SplashScreen } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import 'react-native-reanimated';
+import { View, Image, StyleSheet, Animated, SafeAreaView } from 'react-native';
+import { useFonts, SpaceGrotesk_400Regular, SpaceGrotesk_500Medium, SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
+import { useFrameworkReady } from '@/hooks/useFrameworkReady';
+import { ThemeProvider } from '@/context/ThemeContext';
+import { RefreshProvider } from '@/context/RefreshContext';
+import { AuthProvider } from '@/context/AuthContext';
+import Toast from 'react-native-toast-message';
 
-import { useColorScheme } from '@/hooks/useColorScheme';
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+  useFrameworkReady();
+  const [isSplashReady, setSplashReady] = useState(false);
+  const fadeAnim = new Animated.Value(1);
+
+  const [fontsLoaded, fontError] = useFonts({
+    'SpaceGrotesk-Regular': SpaceGrotesk_400Regular,
+    'SpaceGrotesk-Medium': SpaceGrotesk_500Medium,
+    'SpaceGrotesk-SemiBold': SpaceGrotesk_600SemiBold,
+    'SpaceGrotesk-Bold': SpaceGrotesk_700Bold,
+    'Inter-Regular': Inter_400Regular,
+    'Inter-Medium': Inter_500Medium,
+    'Inter-SemiBold': Inter_600SemiBold,
   });
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+    if (fontsLoaded || fontError) {
+      const timer = setTimeout(() => {
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 800,
+          useNativeDriver: true,
+        }).start(() => {
+          setSplashReady(true);
+          SplashScreen.hideAsync();
+        });
+      }, 1500);
+      return () => clearTimeout(timer);
     }
-  }, [loaded]);
+  }, [fontsLoaded, fontError]);
 
-  if (!loaded) {
-    return null;
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={styles.splashContainer}>
+        <Image
+          source={{ uri: 'https://images.unsplash.com/photo-1436891620584-47fd0e565afb?q=80&w=2067&auto=format&fit=crop' }}
+          style={styles.splashImage}
+        />
+      </View>
+    );
+  }
+
+  if (!isSplashReady) {
+    return (
+      <Animated.View style={[styles.splashContainer, { opacity: fadeAnim }]}>
+        <Image
+          source={{ uri: 'https://images.unsplash.com/photo-1464037866556-6812c9d1c72e?q=80&w=2940&auto=format&fit=crop' }}
+          style={styles.splashImage}
+        />
+      </Animated.View>
+    );
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider>
+        <RefreshProvider>
+          <SafeAreaView style={{ flex: 1 }}>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="+not-found" options={{ presentation: 'modal' }} />
+            </Stack>
+            <Toast />
+            <StatusBar style="light" />
+          </SafeAreaView>
+        </RefreshProvider>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  splashContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  splashImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+});
