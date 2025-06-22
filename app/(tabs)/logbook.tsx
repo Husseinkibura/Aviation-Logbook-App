@@ -1,22 +1,19 @@
 // app/(tabs)/logbook.tsx
-import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
-import { Search, Filter } from 'lucide-react-native';
-import { getFlights } from '@/lib/api';
-import { useTheme } from '@/context/ThemeContext';
-import { format, parseISO } from 'date-fns';
 
-interface Flight {
-  id: string;
-  departure_airport: string;
-  arrival_airport: string;
-  start_time: string;
-  end_time: string;
-  total_hours: number;
-  aircraft_type: string;
-  flight_number: string;
-  conditions: string[];
-}
+import { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  RefreshControl,
+} from 'react-native';
+import { Search, Filter, Cloud, Pencil, ChevronDown, ChevronUp } from 'lucide-react-native';
+import FlightService from '@/services/flightService';
+import { useTheme } from '@/context/ThemeContext';
+import { useFocusEffect } from '@react-navigation/native';
+import { Flight } from '@/types/flight';
 
 export default function LogbookScreen() {
   const { isDark } = useTheme();
@@ -24,12 +21,23 @@ export default function LogbookScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [newFlightsCount, setNewFlightsCount] = useState(0);
+  const [expandedSections, setExpandedSections] = useState({
+    manual: true,
+    automatic: true,
+  });
 
-  const fetchFlights = async () => {
+  const fetchFlights = useCallback(async () => {
     try {
-      const response = await getFlights();
-      setFlights(response.data);
+      const flights = await FlightService.getFlights();
+      setFlights(flights);
       setError('');
+      
+      // Track if new flights were added
+      if (flights.length > flights.length) {
+        setNewFlightsCount(flights.length - flights.length);
+        setTimeout(() => setNewFlightsCount(0), 3000);
+      }
     } catch (err) {
       setError('Failed to fetch flights');
       console.error(err);
@@ -37,16 +45,58 @@ export default function LogbookScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
+
+  // Refresh when screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchFlights();
+    }, [fetchFlights])
+  );
 
   useEffect(() => {
     fetchFlights();
-  }, []);
+  }, [fetchFlights]);
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchFlights();
   };
+
+  const toggleSection = (section: 'manual' | 'automatic') => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section],
+    }));
+  };
+
+  // Categorize flights
+  const manualFlights = flights.filter(flight => 
+    !flight.remarks.includes('Mock data') && 
+    !flight.remarks.includes('Auto-filled')
+  );
+  
+  const automaticFlights = flights.filter(flight => 
+    flight.remarks.includes('Mock data') || 
+    flight.remarks.includes('Auto-filled')
+  );
+
+  const sections = [
+    // {
+    //   title: 'Manual Flights',
+    //   key: 'manual',
+    //   data: manualFlights,
+    //   icon: Pencil,
+    //   color: isDark ? '#a78bfa' : '#7c3aed',
+    // },
+    {
+      title: 'Automatic Flights',
+      key: 'automatic',
+      data: automaticFlights,
+      icon: Cloud,
+      color: isDark ? '#60a5fa' : '#2563eb',
+    }
+  ];
 
   if (loading) {
     return (
@@ -66,6 +116,63 @@ export default function LogbookScreen() {
       </View>
     );
   }
+
+  const renderTable = (flights: Flight[]) => (
+    <ScrollView horizontal showsHorizontalScrollIndicator>
+      <View style={{ marginBottom: 16, minWidth: 900 }}>
+        {/* Table Header */}
+        <View style={[styles.tableRow, { backgroundColor: isDark ? '#1f2937' : '#e2e8f0' }]}>
+          <Text style={[styles.cellHeader, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>Date</Text>
+          <Text style={[styles.cellHeader, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>Flight #</Text>
+          <Text style={[styles.cellHeader, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>Aircraft</Text>
+          <Text style={[styles.cellHeader, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>Duration</Text>
+          <Text style={[styles.cellHeader, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>Dep</Text>
+          <Text style={[styles.cellHeader, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>Arr</Text>
+          <Text style={[styles.cellHeader, { flex: 1.5, color: isDark ? '#fff' : '#1e293b' }]}>From → To</Text>
+          <Text style={[styles.cellHeader, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>Type</Text>
+        </View>
+
+        {/* Table Rows */}
+        {flights.map((flight) => (
+          <View
+            key={flight.id}
+            style={[
+              styles.tableRow,
+              {
+                borderBottomColor: isDark ? '#334155' : '#e2e8f0',
+                borderBottomWidth: 1,
+              },
+            ]}
+          >
+            <Text style={[styles.cell, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.date}
+            </Text>
+            <Text style={[styles.cell, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.flightNumber}
+            </Text>
+            <Text style={[styles.cell, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.aircraftType}
+            </Text>
+            <Text style={[styles.cell, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.totalTime.toFixed(1)} hrs
+            </Text>
+            <Text style={[styles.cell, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.departureTime}
+            </Text>
+            <Text style={[styles.cell, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.arrivalTime}
+            </Text>
+            <Text style={[styles.cell, { flex: 1.5, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.departure} → {flight.arrival}
+            </Text>
+            <Text style={[styles.cell, { flex: 1, color: isDark ? '#fff' : '#1e293b' }]}>
+              {flight.crossCountryTime > 0 ? 'Cross Country' : 'Local'}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: isDark ? '#0f172a' : '#f8fafc' }]}>
@@ -91,6 +198,7 @@ export default function LogbookScreen() {
             refreshing={refreshing}
             onRefresh={onRefresh}
             colors={[isDark ? '#60a5fa' : '#2563eb']}
+            title={newFlightsCount > 0 ? `${newFlightsCount} new flights` : null}
           />
         }
       >
@@ -99,64 +207,45 @@ export default function LogbookScreen() {
             <Text style={[styles.emptyText, { color: isDark ? '#94a3b8' : '#64748b' }]}>
               No flights recorded yet
             </Text>
+            <Text style={[styles.hintText, { color: isDark ? '#64748b' : '#94a3b8' }]}>
+              Use the "+" tab to add your first flight
+            </Text>
           </View>
         ) : (
-          flights.map((flight) => (
-            <TouchableOpacity
-              key={flight.id}
-              style={[styles.logEntry, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}
-            >
-              <View style={styles.logHeader}>
-                <Text style={[styles.logDate, { color: isDark ? '#fff' : '#1e293b' }]}>
-                  {format(parseISO(flight.start_time), 'MMM dd, yyyy')}
-                </Text>
-                {flight.conditions.length > 0 && (
-                  <Text style={styles.logType}>
-                    {flight.conditions[0]}
-                  </Text>
+          <View>
+            {sections.map((section) => (
+              <View key={section.key} style={styles.sectionContainer}>
+                <TouchableOpacity 
+                  onPress={() => toggleSection(section.key as 'manual' | 'automatic')}
+                  style={styles.sectionHeader}
+                >
+                  <View style={styles.sectionTitleContainer}>
+                    <section.icon size={20} color={section.color} />
+                    <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>
+                      {section.title} ({section.data.length})
+                    </Text>
+                  </View>
+                  {expandedSections[section.key as 'manual' | 'automatic'] ? (
+                    <ChevronUp size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                  ) : (
+                    <ChevronDown size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                  )}
+                </TouchableOpacity>
+                
+                {expandedSections[section.key as 'manual' | 'automatic'] && (
+                  section.data.length > 0 ? (
+                    renderTable(section.data)
+                  ) : (
+                    <View style={styles.emptySection}>
+                      <Text style={[styles.emptySectionText, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                        No {section.title.toLowerCase()} found
+                      </Text>
+                    </View>
+                  )
                 )}
               </View>
-
-              <View style={styles.flightInfo}>
-                <View style={styles.infoColumn}>
-                  <Text style={[styles.infoLabel, { color: isDark ? '#94a3b8' : '#64748b' }]}>
-                    Aircraft
-                  </Text>
-                  <Text style={[styles.infoValue, { color: isDark ? '#fff' : '#1e293b' }]}>
-                    {flight.aircraft_type}
-                  </Text>
-                </View>
-                <View style={styles.infoColumn}>
-                  <Text style={[styles.infoLabel, { color: isDark ? '#94a3b8' : '#64748b' }]}>
-                    Duration
-                  </Text>
-                  <Text style={[styles.infoValue, { color: isDark ? '#fff' : '#1e293b' }]}>
-                    {flight.total_hours.toFixed(1)} hrs
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.routeContainer}>
-                <View style={styles.routePoint}>
-                  <Text style={[styles.routeAirport, { color: isDark ? '#fff' : '#1e293b' }]}>
-                    {flight.departure_airport}
-                  </Text>
-                  <Text style={[styles.routeTime, { color: isDark ? '#94a3b8' : '#64748b' }]}>
-                    {format(parseISO(flight.start_time), 'HH:mm')}
-                  </Text>
-                </View>
-                <View style={[styles.routeLine, { backgroundColor: isDark ? '#2d3748' : '#e2e8f0' }]} />
-                <View style={styles.routePoint}>
-                  <Text style={[styles.routeAirport, { color: isDark ? '#fff' : '#1e293b' }]}>
-                    {flight.arrival_airport}
-                  </Text>
-                  <Text style={[styles.routeTime, { color: isDark ? '#94a3b8' : '#64748b' }]}>
-                    {format(parseISO(flight.end_time), 'HH:mm')}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))
+            ))}
+          </View>
         )}
       </ScrollView>
     </View>
@@ -166,19 +255,16 @@ export default function LogbookScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   header: {
     padding: 16,
     paddingTop: 60,
-    backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#1e293b',
     marginBottom: 16,
   },
   searchContainer: {
@@ -190,94 +276,84 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f1f5f9',
     padding: 12,
     borderRadius: 12,
     gap: 8,
   },
   searchPlaceholder: {
-    color: '#64748b',
     flex: 1,
   },
   filterButton: {
     padding: 12,
-    backgroundColor: '#f1f5f9',
     borderRadius: 12,
   },
   content: {
     flex: 1,
     padding: 16,
   },
-  logEntry: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  logHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  emptyState: {
     alignItems: 'center',
-    marginBottom: 12,
+    marginTop: 32,
   },
-  logDate: {
+  emptyText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1e293b',
   },
-  logType: {
+  hintText: {
     fontSize: 14,
-    color: '#60a5fa',
-    backgroundColor: '#eff6ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    marginTop: 8,
   },
-  flightInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+  retryButton: {
+    marginTop: 12,
+    backgroundColor: '#2563eb',
+    padding: 10,
+    borderRadius: 8,
   },
-  infoColumn: {
-    flex: 1,
-  },
-  infoLabel: {
-    fontSize: 12,
-    color: '#64748b',
-    marginBottom: 4,
-  },
-  infoValue: {
-    fontSize: 14,
-    color: '#1e293b',
-    fontWeight: '500',
-  },
-  routeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  routePoint: {
-    alignItems: 'center',
-  },
-  routeAirport: {
-    fontSize: 16,
+  retryText: {
+    color: '#fff',
     fontWeight: 'bold',
-    color: '#1e293b',
   },
-  routeTime: {
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  cellHeader: {
+    fontWeight: 'bold',
     fontSize: 12,
-    color: '#64748b',
-    marginTop: 4,
+    textAlign: 'center',
   },
-  routeLine: {
-    flex: 1,
-    height: 2,
-    backgroundColor: '#e2e8f0',
-    marginHorizontal: 12,
+  cell: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  sectionContainer: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  emptySection: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptySectionText: {
+    fontSize: 14,
   },
 });

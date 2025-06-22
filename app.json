@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "pilot-logbook",
+    "name": "Pilot Logbook",
     "slug": "pilot-logbook",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,8 +8,7 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "backgroundColor": "#000000",
-      "image": "./assets/images/splash.png"
+      "backgroundColor": "#001f4d"
     },
     "plugins": [
       "expo-router"

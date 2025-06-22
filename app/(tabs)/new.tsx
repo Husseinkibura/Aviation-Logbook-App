@@ -1,36 +1,126 @@
-// app/(tabs)/new.tsx
-
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView } from 'react-native';
-import { Plane, Calendar, Clock, MapPin, FileText, Fuel, Cloud, Thermometer, Wind } from 'lucide-react-native';
+import { Plane, Calendar, Clock, MapPin, FileText, Download, Save } from 'lucide-react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { router } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import { format } from 'date-fns';
 import { createFlight } from '@/lib/api';
+import FlightService from '@/services/flightService';
 
 export default function NewFlightScreen() {
   const { isDark } = useTheme();
+  const [mode, setMode] = useState('automatic');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [totalHours, setTotalHours] = useState('');
   const [departureAirport, setDepartureAirport] = useState('');
   const [arrivalAirport, setArrivalAirport] = useState('');
   const [flightStarted, setFlightStarted] = useState(false);
-  const [selectedConditions, setSelectedConditions] = useState([]);
+  const [selectedConditions, setSelectedConditions] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  // Flight details
   const [flightName, setFlightName] = useState('');
   const [aircraftType, setAircraftType] = useState('');
   const [flightNumber, setFlightNumber] = useState('');
   const [route, setRoute] = useState('');
-  const [fuelUsed, setFuelUsed] = useState('');
-  const [weatherConditions, setWeatherConditions] = useState('');
-  const [temperature, setTemperature] = useState('');
-  const [visibility, setVisibility] = useState('');
-  const [windSpeed, setWindSpeed] = useState('');
-  const [windDirection, setWindDirection] = useState('');
+  const [flightDate, setFlightDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [autoFillData, setAutoFillData] = useState({
+    flightNumber: '',
+    date: new Date().toISOString().split('T')[0],
+  });
+
+  const fetchFlightData = async () => {
+    if (!autoFillData.flightNumber || !autoFillData.date) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing Information',
+        text2: 'Please enter flight number and date',
+      });
+      return;
+    }
+
+    // Check for future date
+    const today = new Date();
+    if (new Date(autoFillData.date) > today) {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid Date',
+        text2: 'Cannot search for future flights',
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const flightData = await FlightService.fetchFlightData(
+        autoFillData.flightNumber,
+        autoFillData.date
+      );
+
+       if (flightData) {
+        // Set all fields from fetched data
+        setDepartureAirport(flightData.departure);
+        setArrivalAirport(flightData.arrival);
+        setAircraftType(flightData.aircraftType);
+        setStartTime(flightData.departureTime);
+        setEndTime(flightData.arrivalTime);
+        setTotalHours(flightData.totalTime.toString());
+        setFlightNumber(flightData.flightNumber); // Add this line
+        setFlightDate(flightData.date); // Add this line
+
+        const formattedDate = new Date(flightData.date).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric'
+        });
+        
+        // Create flight name using fetched data
+        setFlightName(`${flightData.departure}-${flightData.arrival} ${formattedDate}`);
+
+        Toast.show({
+          type: 'success',
+          text1: 'Flight Data Loaded',
+          text2: 'Flight details have been auto-filled',
+        });
+      } else {
+        Toast.show({
+          type: 'info',
+          text1: 'Flight Not Found',
+          text2: 'No flight data available for this number and date',
+        });
+      }
+    } catch (error) {
+      console.error('Flight data fetch error:', error);
+      
+      let errorMessage = 'Failed to fetch flight data';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      if (errorMessage.includes('API rate limit')) {
+        errorMessage = 'API limit reached. Try again later.';
+      } else if (errorMessage.includes('Invalid date format')) {
+        errorMessage = 'Please use YYYY-MM-DD format for date';
+      } else if (errorMessage.includes('Unexpected API response format')) {
+        errorMessage = 'The flight data service returned an unexpected format. Please try manual entry.';
+      } else if (errorMessage.includes('Flight data incomplete')) {
+        errorMessage = 'Incomplete flight data received. Some fields may be missing.';
+      } else if (errorMessage.includes('API error')) {
+        errorMessage = 'Flight data service error. Please check your inputs.';
+      }
+      
+      Toast.show({
+        type: 'error',
+        text1: 'API Error',
+        text2: errorMessage,
+        visibilityTime: 5000,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleStartFlight = async () => {
     if (!departureAirport || !flightName || !aircraftType) {
@@ -85,16 +175,10 @@ export default function NewFlightScreen() {
         aircraft_type: aircraftType,
         flight_number: flightNumber,
         route,
-        fuel_used: parseFloat(fuelUsed) || 0,
         conditions: selectedConditions,
         notes,
-        weather_conditions: {
-          temperature: parseFloat(temperature),
-          visibility: parseFloat(visibility),
-          wind_speed: parseFloat(windSpeed),
-          wind_direction: parseFloat(windDirection),
-          conditions: weatherConditions
-        }
+        flight_date: flightDate,
+        flight_name: flightName,
       };
 
       await createFlight(flightData);
@@ -105,18 +189,75 @@ export default function NewFlightScreen() {
         text2: 'Your flight has been added to your logbook',
       });
 
-      router.push('/logbook');
+      router.push('/(tabs)/logbook');
     } catch (error) {
+      let errorMessage = 'Failed to save flight data';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
       console.error('Flight submission error:', error);
       Toast.show({
         type: 'error',
         text1: 'Error',
-        text2: error.message || 'Failed to save flight data',
+        text2: errorMessage,
       });
     }
   };
 
-  const toggleCondition = (condition) => {
+  const handleSaveManual = async () => {
+    if (!departureAirport || !arrivalAirport || !startTime || !endTime || !totalHours) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing Information',
+        text2: 'Please fill all required fields',
+      });
+      return;
+    }
+
+    try {
+      // Combine date with time
+      const startDateTime = new Date(`${flightDate}T${startTime}`);
+      const endDateTime = new Date(`${flightDate}T${endTime}`);
+
+      const flightData = {
+        departure_airport: departureAirport,
+        arrival_airport: arrivalAirport,
+        start_time: startDateTime.toISOString(),
+        end_time: endDateTime.toISOString(),
+        total_hours: parseFloat(totalHours),
+        aircraft_type: aircraftType,
+        flight_number: flightNumber,
+        route,
+        conditions: selectedConditions,
+        notes,
+        flight_date: flightDate,
+        flight_name: flightName,
+      };
+
+      await createFlight(flightData);
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Flight Saved',
+        text2: 'Your manual flight has been logged',
+      });
+
+      router.push('/(tabs)/logbook');
+    } catch (error) {
+      let errorMessage = 'Failed to save flight data';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      console.error('Flight submission error:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: errorMessage,
+      });
+    }
+  };
+
+  const toggleCondition = (condition: string) => {
     setSelectedConditions(current =>
       current.includes(condition)
         ? current.filter(c => c !== condition)
@@ -132,217 +273,297 @@ export default function NewFlightScreen() {
       </View>
 
       <ScrollView style={styles.content}>
+        {/* Mode Selector */}
+        <View style={styles.modeSelector}>
+          <TouchableOpacity
+            style={[
+              styles.modeButton,
+              mode === 'automatic' && styles.activeModeButton,
+              { backgroundColor: isDark ? '#1e293b' : '#fff' }
+            ]}
+            onPress={() => setMode('automatic')}
+          >
+            <Text style={[styles.modeText, mode === 'automatic' && styles.activeModeText]}>
+              Automatic
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              styles.modeButton,
+              mode === 'manual' && styles.activeModeButton,
+              { backgroundColor: isDark ? '#1e293b' : '#fff' }
+            ]}
+            onPress={() => setMode('manual')}
+          >
+            <Text style={[styles.modeText, mode === 'manual' && styles.activeModeText]}>
+              Manual
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Auto-fill Section */}
+        {mode === 'automatic' && (
+          <View style={[styles.section, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+            <View style={[styles.sectionHeader, { marginBottom: 16 }]}>
+              <Plane size={20} color={isDark ? '#60a5fa' : '#3b82f6'} />
+              <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>
+                Auto-fill Flight Data
+              </Text>
+            </View>
+            
+            <View style={styles.inputRow}>
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                  Flight Number
+                </Text>
+                <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                  <TextInput
+                    style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                    placeholder="e.g., UA2402"
+                    placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                    value={autoFillData.flightNumber}
+                    onChangeText={(text) => setAutoFillData({...autoFillData, flightNumber: text.toUpperCase()})}
+                    editable={!flightStarted}
+                  />
+                </View>
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                  Date
+                </Text>
+                <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                  <TextInput
+                    style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                    value={autoFillData.date}
+                    onChangeText={(text) => setAutoFillData({...autoFillData, date: text})}
+                    editable={!flightStarted}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.autoFillButton, { 
+                backgroundColor: isDark ? '#3b82f6' : '#2563eb',
+                opacity: loading || flightStarted ? 0.6 : 1
+              }]}
+              onPress={fetchFlightData}
+              disabled={loading || flightStarted}
+            >
+              <Download size={20} color="#FFFFFF" />
+              <Text style={styles.buttonText}>
+                {loading ? 'Searching...' : 'Find Flight Data'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>Flight Information</Text>
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>
+            Flight Information
+          </Text>
           
           <View style={[styles.inputGroup, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <FileText size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Flight Name"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={flightName}
-                onChangeText={setFlightName}
-                editable={!flightStarted}
-              />
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Flight Name
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <FileText size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="Flight Name"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={flightName}
+                  onChangeText={setFlightName}
+                  editable={!flightStarted}
+                />
+              </View>
             </View>
 
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Plane size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Aircraft Type"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={aircraftType}
-                onChangeText={setAircraftType}
-                editable={!flightStarted}
-              />
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Aircraft Type
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <Plane size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="Aircraft Type"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={aircraftType}
+                  onChangeText={setAircraftType}
+                  editable={!flightStarted}
+                />
+              </View>
             </View>
 
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <FileText size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Flight Number"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={flightNumber}
-                onChangeText={setFlightNumber}
-                editable={!flightStarted}
-              />
-            </View>
-
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Fuel size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Fuel Used (gallons)"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={fuelUsed}
-                onChangeText={setFuelUsed}
-                keyboardType="numeric"
-              />
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Flight Number
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <FileText size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="Flight Number"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={flightNumber}
+                  onChangeText={setFlightNumber}
+                  editable={!flightStarted}
+                />
+              </View>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>Flight Details</Text>
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>
+            Flight Details
+          </Text>
           
           <View style={[styles.inputGroup, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Calendar size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Date"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={new Date().toLocaleDateString()}
-                editable={false}
-              />
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Date
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <Calendar size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={flightDate}
+                  onChangeText={setFlightDate}
+                  editable={mode === 'manual' && !flightStarted}
+                />
+              </View>
             </View>
 
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Clock size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Start Time"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={startTime}
-                editable={false}
-              />
+            {/* Start Time */}
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Start Time
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <Clock size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="HH:MM"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={startTime}
+                  onChangeText={setStartTime}
+                  editable={mode === 'manual' || !flightStarted}
+                  keyboardType="numbers-and-punctuation"
+                />
+              </View>
             </View>
 
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Clock size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="End Time"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={endTime}
-                editable={false}
-              />
+            {/* End Time */}
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                End Time
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <Clock size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="HH:MM"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={endTime}
+                  onChangeText={setEndTime}
+                  editable={mode === 'manual' || !flightStarted}
+                  keyboardType="numbers-and-punctuation"
+                />
+              </View>
             </View>
 
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Clock size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Total Hours"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={totalHours ? `${totalHours} hours` : ''}
-                editable={false}
-              />
+            {/* Total Hours */}
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Total Hours
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <Clock size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="Total Hours"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={totalHours}
+                  onChangeText={setTotalHours}
+                  editable={mode === 'manual'}
+                  keyboardType="decimal-pad"
+                />
+              </View>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>Route</Text>
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>
+            Route
+          </Text>
           
           <View style={[styles.inputGroup, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <MapPin size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Departure Airport"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={departureAirport}
-                onChangeText={setDepartureAirport}
-                editable={!flightStarted}
-              />
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Departure Airport
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <MapPin size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="Departure Airport"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={departureAirport}
+                  onChangeText={setDepartureAirport}
+                  editable={!flightStarted}
+                />
+              </View>
             </View>
 
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <MapPin size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Arrival Airport"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={arrivalAirport}
-                onChangeText={setArrivalAirport}
-              />
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Arrival Airport
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <MapPin size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="Arrival Airport"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={arrivalAirport}
+                  onChangeText={setArrivalAirport}
+                />
+              </View>
             </View>
 
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <MapPin size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Route Details"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={route}
-                onChangeText={setRoute}
-              />
+            <View style={styles.inputContainer}>
+              <Text style={[styles.label, { color: isDark ? '#94a3b8' : '#64748b' }]}>
+                Route Details
+              </Text>
+              <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
+                <MapPin size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                <TextInput
+                  style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
+                  placeholder="Route Details"
+                  placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
+                  value={route}
+                  onChangeText={setRoute}
+                />
+              </View>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>Weather Information</Text>
-          
-          <View style={[styles.inputGroup, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Cloud size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Weather Conditions"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={weatherConditions}
-                onChangeText={setWeatherConditions}
-              />
-            </View>
-
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Thermometer size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Temperature (°F)"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={temperature}
-                onChangeText={setTemperature}
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Cloud size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Visibility (miles)"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={visibility}
-                onChangeText={setVisibility}
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Wind size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Wind Speed (knots)"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={windSpeed}
-                onChangeText={setWindSpeed}
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9' }]}>
-              <Wind size={20} color={isDark ? '#94a3b8' : '#64748b'} />
-              <TextInput
-                style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
-                placeholder="Wind Direction (degrees)"
-                placeholderTextColor={isDark ? '#94a3b8' : '#64748b'}
-                value={windDirection}
-                onChangeText={setWindDirection}
-                keyboardType="numeric"
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>Flight Conditions</Text>
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>
+            Flight Conditions
+          </Text>
           
           <View style={styles.conditionsGrid}>
             {['Day', 'Night', 'IFR', 'VFR', 'Cross Country', 'Solo'].map((condition) => (
@@ -370,8 +591,13 @@ export default function NewFlightScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>Notes</Text>
-          <View style={[styles.inputContainer, { backgroundColor: isDark ? '#2d3748' : '#f1f5f9', height: 100 }]}>
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#1e293b' }]}>
+            Notes
+          </Text>
+          <View style={[styles.inputWrapper, { 
+            backgroundColor: isDark ? '#2d3748' : '#f1f5f9', 
+            height: 100 
+          }]}>
             <TextInput
               style={[styles.input, { color: isDark ? '#fff' : '#1e293b' }]}
               placeholder="Add flight notes..."
@@ -386,13 +612,28 @@ export default function NewFlightScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-        {!flightStarted ? (
-          <TouchableOpacity style={styles.startButton} onPress={handleStartFlight}>
-            <Text style={styles.buttonText}>Start Flight</Text>
-          </TouchableOpacity>
+        {mode === 'automatic' ? (
+          !flightStarted ? (
+            <TouchableOpacity 
+              style={[styles.startButton, (loading || flightStarted) && styles.disabledButton]} 
+              onPress={handleStartFlight}
+              disabled={loading || flightStarted}
+            >
+              <Text style={styles.buttonText}>Start Flight</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.endButton} onPress={handleEndFlight}>
+              <Text style={styles.buttonText}>End Flight</Text>
+            </TouchableOpacity>
+          )
         ) : (
-          <TouchableOpacity style={styles.endButton} onPress={handleEndFlight}>
-            <Text style={styles.buttonText}>End Flight</Text>
+          <TouchableOpacity 
+            style={[styles.saveButton, loading && styles.disabledButton]} 
+            onPress={handleSaveManual}
+            disabled={loading}
+          >
+            <Save size={20} color="#FFFFFF" />
+            <Text style={styles.buttonText}>Save Flight</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -426,17 +667,35 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
   sectionTitle: {
     fontFamily: 'SpaceGrotesk-Medium',
     fontSize: 18,
-    marginBottom: 12,
   },
   inputGroup: {
     borderRadius: 12,
     padding: 16,
+    gap: 16,
+  },
+  inputRow: {
+    flexDirection: 'row',
     gap: 12,
   },
   inputContainer: {
+    flex: 1,
+    marginBottom: 8,
+  },
+  label: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 8,
@@ -478,6 +737,9 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
   },
   endButton: {
     backgroundColor: '#ef4444',
@@ -485,9 +747,56 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
+  saveButton: {
+    backgroundColor: '#10b981',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  autoFillButton: {
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
   buttonText: {
     fontFamily: 'Inter-SemiBold',
     fontSize: 16,
     color: 'white',
+  },
+  modeSelector: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 20,
+    gap: 10,
+  },
+  modeButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  activeModeButton: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  modeText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 16,
+    color: '#64748b',
+  },
+  activeModeText: {
+    color: 'white',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });

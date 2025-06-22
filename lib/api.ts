@@ -4,11 +4,6 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BASE_URL } from './config';
 
-// const BASE_URL = 
-//   Platform.OS === 'android' 
-//     ? 'http://192.168.43.217:5000/api' 
-//     : 'http://localhost:5000/api';
-
 // Flight API functions
 export const createFlight = async (flightData: any) => {
   const token = await AsyncStorage.getItem('token');
